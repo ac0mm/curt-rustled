@@ -6,9 +6,11 @@ import cmd
 import socket
 import os
 import paramiko #type: ignore
+import time
 from impacket.smbconnection import SMBConnection #type: ignore
 from impacket.dcerpc.v5 import transport, scmr #type: ignore
 from impacket.dcerpc.v5.dtypes import NULL #type: ignore
+from package.logem import logem #type: ignore
 
 # Define necessary constants
 SC_MANAGER_ALL_ACCESS = 0xF003F
@@ -16,8 +18,6 @@ SERVICE_ALL_ACCESS = 0xF01FF
 SERVICE_WIN32_OWN_PROCESS = 0x00000010
 SERVICE_DEMAND_START = 0x00000003
 SERVICE_ERROR_IGNORE = 0x00000000
-
-
 
 class windows_smb(cmd.Cmd):
 
@@ -33,16 +33,16 @@ class windows_smb(cmd.Cmd):
 
     def _connect_smb(self):
 
-        ip = input("What is the remote host ip?: ")
+        self.ip = input("What is the remote host ip?: ")
         domain = input("What is the remote host's domain?: ")
         username = input("what is the username for the remote host?: ")
         password = getpass.getpass("What is the password?: ")
 
         try:
-            self.smb_connection = SMBConnection(ip, ip)
+            self.smb_connection = SMBConnection(self.ip, self.ip)
             self.smb_connection.login(username, password, domain)
 
-            rpctransport = transport.SMBTransport(ip, filename='\\svcctl', smb_connection=self.smb_connection)
+            rpctransport = transport.SMBTransport(self.ip, filename='\\svcctl', smb_connection=self.smb_connection)
             self.dce = rpctransport.get_dce_rpc()
             self.dce.connect()
             self.dce.bind(scmr.MSRPC_UUID_SCMR) #type: ignore
@@ -124,7 +124,7 @@ class linux_ssh(cmd.Cmd):
         password = None
         sshkey = None
 
-        ip = input("What is the IP of the remote host?: ")
+        self.ip = input("What is the ip of the remote host?: ")
         strport = input("What is the port ssh is listening on on the remote host?: ")
         user = input("What is the username you wish to use?: ")
         
@@ -145,23 +145,31 @@ class linux_ssh(cmd.Cmd):
         try:
 
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect((ip,port))
+            sock.connect((self.ip,port))
 
             #create a paramiko transport
             self.transport = paramiko.Transport(sock)
             
             if password:
                 self.transport.connect(username=user, password=password)
-
+                message = f"Connected to {self.ip} via ssh with password"
+                logem('logs/curt_rustled.log', message, "info")
+                logem(f'{self.ip}/logs/system.log', message, "info")
+                
             elif sshkey:
                 private_key = paramiko.RSAKey.from_private_key_file(sshkey)
                 self.transport.connect(username=user, pkey=private_key)
+                message = f"Connected to {self.ip} via ssh with ssh key"
+                logem('logs/curt_rustled.log', message, "info")
+                logem(f'{self.ip}/logs/system.log', message, "info")
 
-            os.makedirs(ip, exist_ok=True)
+            os.makedirs(self.ip, exist_ok=True)
 
         except Exception as e:
 
-            print(f"Error: {e}")
+            message = f"Error: {e}"
+            logem('logs/error.log', message, "error")
+            print(message)
             if self.transport:
                 self.transport.close()
             if sock:
@@ -174,19 +182,23 @@ class linux_ssh(cmd.Cmd):
             self.transport_none()
 
         try:
+            message = f"Running command {arg}"
+            logem(f'{self.ip}/logs/system.log', message, 'info')
             session = self.transport.open_session()
             session.exec_command(arg)
             stdout = session.makefile('r', -1)
             
             try:
-                print(stdout.read().decode())
+                message = stdout.read().decode()
+                print(message)
+                logem(f'{self.ip}/logs/interactive.log', message, 'info')
             except Exception as e:
                 print(f"Error: {e}")
             
             session.close()
 
         except Exception as e:
-            print(f"Error: {e}")
+            logem('logs/error.log', f"{self.ip} Error: {e}", 'error')
 
     def do_survey(self, arg):
 
@@ -201,9 +213,19 @@ class linux_ssh(cmd.Cmd):
                 session = self.transport.open_session()
                 session.exec_command(command)
                 stdout = session.makefile('r', -1)
-            
+
+                array = command.split()
+                if array:
+                    logcmd = array[0]
+
+                if logcmd:
+                    epochtime = int(time.time())
+                    log = f'{logcmd}-{epochtime}.txt'
+                    
                 try:
-                    print(stdout.read().decode())
+                    message = stdout.read().decode()
+                    print(message)
+                    logem(f'{self.ip}/survey/{log}', message, 'info')
                 except Exception as e:
                     print(f"Error: {e}")
                 session.close()
