@@ -7,105 +7,96 @@ import socket
 import os
 import paramiko #type: ignore
 import time
-from impacket.smbconnection import SMBConnection #type: ignore
-from impacket.dcerpc.v5 import transport, scmr #type: ignore
-from impacket.dcerpc.v5.dtypes import NULL #type: ignore
+import winrm #type: ignore
 from package.logem import logem #type: ignore
 
-# Define necessary constants
-SC_MANAGER_ALL_ACCESS = 0xF003F
-SERVICE_ALL_ACCESS = 0xF01FF
-SERVICE_WIN32_OWN_PROCESS = 0x00000010
-SERVICE_DEMAND_START = 0x00000003
-SERVICE_ERROR_IGNORE = 0x00000000
+class windows_winrm(cmd.Cmd):
 
-class windows_smb(cmd.Cmd):
-
-    intro = 'SMB interactive shell with Impacket'
-    prompt = '(smb)> '
+    intro = 'Winrm interactive shell with pywinrm'
+    prompt = f'(winrm)>'
 
     def __init__ (self):
 
         super().__init__()
-        self.smb_connection = None
-        self.dce = None
-        self._connect_smb()
+        self.winrm_connection = None
+        self._connect_winrm()
 
-    def _connect_smb(self):
+    def _connect_winrm(self):
 
         self.ip = input("What is the remote host ip?: ")
-        domain = input("What is the remote host's domain?: ")
-        username = input("what is the username for the remote host?: ")
+        username = input("What is the username?: ")
         password = getpass.getpass("What is the password?: ")
 
         try:
-            self.smb_connection = SMBConnection(self.ip, self.ip)
-            self.smb_connection.login(username, password, domain)
+            self.winrm_connection = winrm.Session(self.ip, auth=(username, password))
+            message = f"Connected to {self.ip} via winrm"
+            logem('logs/curt_rustled.log', message, "info")
+            logem(f'{self.ip}/logs/system.log', message, "info")
 
-            rpctransport = transport.SMBTransport(self.ip, filename='\\svcctl', smb_connection=self.smb_connection)
-            self.dce = rpctransport.get_dce_rpc()
-            self.dce.connect()
-            self.dce.bind(scmr.MSRPC_UUID_SCMR) #type: ignore
-
-            print("Connected to remote host.")
-        
         except Exception as e:
-            print(f"Connection error: {e}")
+            message = f"Error: {e}"
+            logem('logs/error.log', message, "error")
+            print(message)
             sys.exit(1)
+
+        os.makedirs(self.ip, exist_ok=True)
 
     def do_run(self, arg):
         'Run a command on the remote machine: run <command>'
 
+        if self.winrm_connection is None:
+            sys.exit(1)
+
         try:
-            command = f"cmd.exe /c {arg}"
-            self._execute_remote_command(command)
-            print(f"Executed command: {arg}")
+            message = f"Running command {arg}"
+            logem(f'{self.ip}/logs/system.log', message, 'info')
+
+            runit = self.winrm_connection.run_cmd(arg)
         
+            try:
+                message = runit.std_out.decode()
+                print(message)
+                logem(f'{self.ip}/logs/interactive.log', message, 'info')
+            
+            except Exception as e:
+                print(f"Error: {e}")
+
         except Exception as e:
-            print(f"Error executing Command: {e}")
+            logem('logs/error.log', f"{self.ip} Error: {e}", 'error')
+            sys.exit(1)
 
-    def _execute_remote_command(self, command):
+    def do_survey(self, arg):
 
-        try:
-            # Open SCManager
-            resp = scmr.hROpenSCManagerW(self.dce, NULL, NULL, SC_MANAGER_ALL_ACCESS)
-            scManagerHandle = resp['lpScHandle']
+        survey_commands = [ 'whoami /all', 'pwd', 'systeminfo', 'ipconfig /all', 'tasklist /M', 'netstat /naob', 'dir', 'dir C:\\']
 
-            # Create Service
-            resp = scmr.hRCreateServiceW(
-                self.dce,
-                scManagerHandle,
-                'myservice',               # Service Name
-                'My Test Service',         # Display Name
-                command,                   # Binary Path
-                SERVICE_WIN32_OWN_PROCESS,  # Service Type
-                SERVICE_DEMAND_START,      # Start Type
-                SERVICE_ERROR_IGNORE,      # Error Control
-                NULL,                      # Load Order Group
-                NULL,                      # Tag ID
-                NULL,                      # Dependencies
-                NULL,                      # Service Start Name
-                NULL                       # Password
-            )
-            serviceHandle = resp['lpServiceHandle']
+        for command in survey_commands:
 
-            # Start Service
-            scmr.hRStartServiceW(self.dce, serviceHandle)
-            scmr.hRDeleteService(self.dce, serviceHandle)
-            scmr.hRCloseServiceHandle(self.dce, serviceHandle)
-            scmr.hRCloseServiceHandle(self.dce, scManagerHandle)
-        except Exception as e:
-            print(f"Error in _execute_remote_command: {e}")
-            raise
+            if self.winrm_connection is None:
+                sys.exit(1)
+            
+            try:
+                runit = self.winrm_connection.run_cmd(command)
 
+                array = command.split()
+                if array:
+                    logcmd = array[0]
+
+                if logcmd:
+                    epochtime = int(time.time())
+                    log = f'{logcmd}-{epochtime}.txt'
+                    
+                try:
+                    message = runit.std_out.decode()
+                    print(message)
+                    logem(f'{self.ip}/survey/{log}', message, 'info')
+                except Exception as e:
+                    print(f"Error: {e}")
+
+            except Exception as e:
+                print(f"Error: {e}")
 
     def do_exit(self, arg):
         'Exit the shell'
-
-        if self.dce:
-            self.dce.disconnect()
-        if self.smb_connection:
-            self.smb_connection.logoff()
         return True
 
 class linux_ssh(cmd.Cmd):
@@ -155,9 +146,40 @@ class linux_ssh(cmd.Cmd):
                 message = f"Connected to {self.ip} via ssh with password"
                 logem('logs/curt_rustled.log', message, "info")
                 logem(f'{self.ip}/logs/system.log', message, "info")
-                
+
             elif sshkey:
-                private_key = paramiko.RSAKey.from_private_key_file(sshkey)
+
+                try:
+                    with open(sshkey, 'r') as key_file:
+                        first_line = key_file.readline().strip()
+
+                        if 'BEGIN RSA PRIVATE KEY' in first_line:
+                            keytype = 'RSA'
+                        elif 'BEGIN OPENSSH PRIVATE KEY' in first_line:
+                            keytype = 'ECDSA'
+                        else:
+                            print('Unknown key type, exiting')
+                            sys.exit(0)
+
+                except Exception as e:
+
+                    message = f'Error: {e}'
+                    logem('logs/error.log', message, "error")
+                    print("Error exiting")
+                    sys.exit(1)
+
+                if keytype == 'RSA':
+
+                    private_key = paramiko.RSAKey.from_private_key_file(sshkey)
+
+                elif keytype == 'ECDSA':
+
+                    private_key = paramiko.ECDSAKey.from_private_key_file(sshkey)
+
+                else:
+                    print('Unknown key type, exiting')
+                    exit(0)
+
                 self.transport.connect(username=user, pkey=private_key)
                 message = f"Connected to {self.ip} via ssh with ssh key"
                 logem('logs/curt_rustled.log', message, "info")
@@ -241,16 +263,16 @@ class linux_ssh(cmd.Cmd):
 if __name__ == '__main__':
 
     while True:
-        remoteType = input("SSH to linux or SMB?: ")
-        if remoteType == "SMB" or remoteType == "smb":
-            shell = windows_smb()
+        remoteType = input("Please choose an option:\nSSH = Linux, WINRM = windows: ")
+        if remoteType == "SSH" or remoteType == "ssh":
+            shell = linux_ssh()
             shell.cmdloop()
             break
-        elif remoteType == "SSH" or remoteType == "ssh":
-            shell = linux_ssh()
+        elif remoteType == "winrm" or remoteType == 'WINRM':
+            shell = windows_winrm()
             shell.cmdloop()
             break
         elif remoteType == "exit" or remoteType == "quit":
             quit()
         else:
-            print("Not a valid option, please select ssh, smb, exit or quit")
+            print("Not a valid option, please select ssh, winrm, exit or quit")

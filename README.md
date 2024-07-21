@@ -3,19 +3,20 @@ Basic remote interactive tool with survey module
 
 ## Demo
 
-https://www.youtube.com/watch?v=NBhoRoCX9go
+Cycle 8: https://www.youtube.com/watch?v=NBhoRoCX9go
+Cycle 10: 
 
 ## Description
 
-For DSU CSC842 - Security Tools Cycle 8
+For DSU CSC842 - Security Tools Cycle 8 and Cycle 10
 
-Wrapper for SSH interarctions and a survey module with a goal to expand to include SMB remote command interaction with Windows.
+Wrapper for SSH interarctions for Linux and WinRM interactions for Windows with a survey module
 
 ## Prerequisties
 
 - python 3.8 or higher
 - paramiko
-- impacket
+- pywinrm
   
 ## Installation
 
@@ -25,7 +26,7 @@ Wrapper for SSH interarctions and a survey module with a goal to expand to inclu
 
 python3 curt_rustled.py
 
-Select SMB or SSH and follow the prompts
+Select WinRM or SSH and follow the prompts
 
 ## Three Main Points
 
@@ -39,7 +40,6 @@ As with previous projects I am interested in providing tools that ensure interac
 
 # Areas of Improvement
 
-- Full windows support, SMB is giving me errors, still troubleshooting
 - Better capture of output for common commands, such as process list, netstat, directory listings
 - upload and download
 - traffic redirection
