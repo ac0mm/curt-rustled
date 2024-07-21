@@ -40,6 +40,7 @@ As with previous projects I am interested in providing tools that ensure interac
 
 # Areas of Improvement
 
+- Investigate additional SSH key headers for inclusion in the ssh section
 - Better capture of output for common commands, such as process list, netstat, directory listings
 - upload and download
 - traffic redirection
